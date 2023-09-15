@@ -1,219 +1,151 @@
-const express = require('express');
-const cookieParser = require("cookie-parser");
-const sessions = require('express-session');
-const http = require('http');
-var parseUrl = require('body-parser');
+const express = require("express");
+const path = require("path");
+const { open } = require("sqlite");
+const sqlite3 = require("sqlite3");
+
 const app = express();
-
-var mysql = require('mysql');
-
+app.use(express.json());
+const dbPath = path.join(__dirname, "goodreads..db");
 let encodeUrl = parseUrl.urlencoded({ extended: false });
 
-//session middleware
-app.use(sessions({
-    secret: "thisismysecrctekey",
-    saveUninitialized:true,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 }, // 24 hours
-    resave: false
-}));
+let db = null;
 
-app.use(cookieParser());
-
-var con = mysql.createConnection({
-    host: "localhost",
-    user: "root", // my username
-    password: "", // my password
-    database: "myform"
-});
-
-app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/register.html');
-})
-
-app.post('/register', encodeUrl, (req, res) => {
-    var firstName = req.body.firstName;
-    var lastName = req.body.lastName;
-    var email=req.body.email;
-    var userName = req.body.userName;
-    var password = req.body.password;
-
-    con.connect(function(err) {
-        if (err){
-            console.log(err);
-        };
-        // checking user already registered or no
-        con.query(`SELECT * FROM users WHERE username = '${userName}' AND password  = '${password}'`, function(err, result){
-            if(err){
-                console.log(err);
-            };
-            if(Object.keys(result).length > 0){
-                res.sendFile(__dirname + '/failReg.html');
-            }else{
-            //creating user page in userPage function
-            function userPage(){
-                // We create a session for the dashboard (user page) page and save the user data to this session:
-                req.session.user = {
-                    firstname: firstName,
-                    lastname: lastName,
-                    email:email,
-                    username: userName,
-                    password: password 
-                };
-
-                res.send(`
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                    <title>Login and register form with Node.js, Express.js and MySQL</title>
-                    <meta charset="UTF-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-                </head>
-                <body>
-                    <div class="container">
-                        <h3>Hi, ${req.session.user.firstname} ${req.session.user.lastname}</h3>
-                        <a href="/">Log out</a>
-                    </div>
-                </body>
-                </html>
-                `);
-            }
-                // inserting new user data
-                var sql = `INSERT INTO users (firstname, lastname, username, password) VALUES ('${firstName}', '${lastName}', '${userName}', '${password}')`;
-                con.query(sql, function (err, result) {
-                    if (err){
-                        console.log(err);
-                    }else{
-                        // using userPage function for creating user page
-                        userPage();
-                    };
-                });
-
-        }
-
-        });
+const initializeDBAndServer = async () => {
+  try {
+    db = await open({
+      filename: dbPath,
+      driver: sqlite3.Database,
     });
-
-
-});
-
-app.get("/login", (req, res)=>{
-    res.sendFile(__dirname + "/login.html");
-});
-
-// get user data to /dashboard page
-app.post("/dashboard", encodeUrl, (req, res)=>{
-    var userName = req.body.userName;
-    var password = req.body.c_password;
-
-    con.connect(function(err) {
-        if(err){
-            console.log(err);
-        };
-//get user data from MySQL database
-        con.query(`SELECT * FROM users WHERE username = '${userName}' AND password = '${password}'`, function (err, result) {
-          if(err){
-            console.log(err);
-          };
-// creating userPage function to create user page
-          function userPage(){
-            // We create a session for the dashboard (user page) page and save the user data to this session:
-            req.session.user = {
-                firstname: result[0].firstname, // get MySQL row data
-                lastname: result[0].lastname, // get MySQL row dataa
-                username: userName,
-                password: password 
-            };
-
-            res.send(`
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <title>Login and register form with Node.js, Express.js and MySQL</title>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-            </head>
-            <body>
-                <div class="container">
-                    <h3>Hi, ${req.session.user.firstname} ${req.session.user.lastname}</h3>
-                    <a href="/">Log out</a>
-                </div>
-            </body>
-            </html>
-            `);
-        }
-
-        if(Object.keys(result).length > 0){
-            userPage();
-        }else{
-            res.sendFile(__dirname + '/failLog.html');
-        }
-
-        });
+    app.listen(3000, () => {
+      console.log("Server Running at http://localhost:3000/");
     });
+  } catch (e) {
+    console.log(`DB Error: ${e.message}`);
+    process.exit(1);
+  }
+};
+initializeDBAndServer();
+
+// Get Books API
+app.get("/books/", async (request, response) => {
+  const getBooksQuery = `SELECT
+      *
+    FROM
+      book
+    ORDER BY
+      book_id;`;
+  const booksArray = await db.all(getBooksQuery);
+  response.send(booksArray);
 });
 
-app.get("/forget", (req, res)=>{
-    res.sendFile(__dirname + "/forget.html");
+//Get Book API
+app.get("/books/:bookId/", async (request, response) => {
+  const { bookId } = request.params;
+  const getBookQuery = `SELECT
+      *
+    FROM
+      book
+    WHERE
+      book_id = ${bookId};`;
+  const book = await db.get(getBookQuery);
+  response.send(book);
 });
 
-// get user data to /dashboard page
-app.post("/dashboard", encodeUrl, (req, res)=>{
-    var userName = req.body.userName;
-    var password = req.body.c_password;
-    
+//Post Book API
+app.post("/books/", async (request, response) => {
+  const bookDetails = request.body;
+  const {
+    title,
+    authorId,
+    rating,
+    ratingCount,
+    reviewCount,
+    description,
+    pages,
+    dateOfPublication,
+    editionLanguage,
+    price,
+    onlineStores,
+  } = bookDetails;
+  const addBookQuery = `INSERT INTO
+      book (title,author_id,rating,rating_count,review_count,description,pages,date_of_publication,edition_language,price,online_stores)
+    VALUES
+      (
+        '${title}',
+         ${authorId},
+         ${rating},
+         ${ratingCount},
+         ${reviewCount},
+        '${description}',
+         ${pages},
+        '${dateOfPublication}',
+        '${editionLanguage}',
+         ${price},
+        '${onlineStores}'
+      );`;
 
-    con.connect(function(err) {
-        if(err){
-            console.log(err);
-        };
-//get user data from MySQL database
-        con.query(`SELECT * FROM users WHERE username = '${userName}'`, function (err, result) {
-          if(err){
-            console.log(err);
-          };
-// creating userPage function to create user page
-          function userPage(){
-            // We create a session for the dashboard (user page) page and save the user data to this session:
-            req.session.user = {
-                firstname: result[0].firstname, // get MySQL row data
-                lastname: result[0].lastname, // get MySQL row dataa
-                username: userName,
-                
-            };
-
-            res.send(`
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <title>Login and register form with Node.js, Express.js and MySQL</title>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-            </head>
-            <body>
-                <div class="container">
-                    <h3>Hi, ${req.session.user.firstname} ${req.session.user.lastname}</h3>
-                    <a href="/">Log out</a>
-                </div>
-            </body>
-            </html>
-            `);
-        }
-
-        if(Object.keys(result).length > 0){
-            userPage();
-        }else{
-            res.sendFile(__dirname + '/failLog.html');
-        }
-
-        });
-    });
+  const dbResponse = await db.run(addBookQuery);
+  const bookId = dbResponse.lastID;
+  response.send({ bookId: bookId });
 });
 
+//Put Book API
+app.put("/books/:bookId/", async (request, response) => {
+  const { bookId } = request.params;
+  const bookDetails = request.body;
+  const {
+    title,
+    authorId,
+    rating,
+    ratingCount,
+    reviewCount,
+    description,
+    pages,
+    dateOfPublication,
+    editionLanguage,
+    price,
+    onlineStores,
+  } = bookDetails;
+  const updateBookQuery = `UPDATE
+      book
+    SET
+      title='${title}',
+      author_id=${authorId},
+      rating=${rating},
+      rating_count=${ratingCount},
+      review_count=${reviewCount},
+      description='${description}',
+      pages=${pages},
+      date_of_publication='${dateOfPublication}',
+      edition_language='${editionLanguage}',
+      price=${price},
+      online_stores='${onlineStores}'
+    WHERE
+      book_id = ${bookId};`;
+  await db.run(updateBookQuery);
+  response.send("Book Updated Successfully");
+});
 
+//Delete Book API
+app.delete("/books/:bookId/", async (request, response) => {
+  const { bookId } = request.params;
+  const deleteBookQuery = `DELETE FROM 
+      book 
+    WHERE
+      book_id = ${bookId};`;
+  await db.run(deleteBookQuery);
+  response.send("Book Deleted Successfully");
+});
 
-app.listen(4000, ()=>{
-    console.log("Server running on port 4000");
+//Get Author Books API
+app.get("/authors/:authorId/books/", async (request, response) => {
+  const { authorId } = request.params;
+  const getAuthorBooksQuery = `SELECT
+     *
+    FROM
+     book
+    WHERE
+      author_id = ${authorId};`;
+  const booksArray = await db.all(getAuthorBooksQuery);
+  response.send(booksArray);
 });
